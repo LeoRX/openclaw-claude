@@ -1,0 +1,125 @@
+name: Check for upstream updates
+
+on:
+  schedule:
+    # Run every 6 hours
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force a rebuild even if nothing changed'
+        required: false
+        default: 'false'
+        type: boolean
+
+jobs:
+  check:
+    name: Check openclaw + claude-code versions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    outputs:
+      changed: ${{ steps.compare.outputs.changed }}
+      openclaw_digest: ${{ steps.fetch.outputs.openclaw_digest }}
+      claude_version: ${{ steps.fetch.outputs.claude_version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch latest openclaw digest from GHCR
+        id: fetch_openclaw
+        run: |
+          DIGEST=$(curl -s \
+            -H "Accept: application/vnd.oci.image.index.v1+json" \
+            -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
+            "https://ghcr.io/v2/openclaw/openclaw/manifests/latest" \
+            --head -o /dev/null \
+            -w "%{header_json}" 2>/dev/null | \
+            jq -r '."docker-content-digest"[0] // empty' 2>/dev/null || echo "")
+
+          # Fallback: use crane/skopeo-style API
+          if [ -z "$DIGEST" ]; then
+            DIGEST=$(curl -s \
+              "https://ghcr.io/v2/openclaw/openclaw/manifests/latest" \
+              -H "Accept: application/vnd.oci.image.index.v1+json" \
+              -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
+              -H "Authorization: Bearer $(curl -s 'https://ghcr.io/token?scope=repository:openclaw/openclaw:pull&service=ghcr.io' | jq -r .token)" \
+              | jq -r '.manifests[0].digest // .digest // empty')
+          fi
+
+          echo "openclaw_digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "Fetched OpenClaw digest: $DIGEST"
+
+      - name: Fetch latest claude-code version from npm
+        id: fetch_claude
+        run: |
+          VERSION=$(curl -s "https://registry.npmjs.org/@anthropic-ai/claude-code/latest" | jq -r '.version')
+          echo "claude_version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Fetched claude-code version: $VERSION"
+
+      - name: Combine outputs
+        id: fetch
+        run: |
+          echo "openclaw_digest=${{ steps.fetch_openclaw.outputs.openclaw_digest }}" >> "$GITHUB_OUTPUT"
+          echo "claude_version=${{ steps.fetch_claude.outputs.claude_version }}" >> "$GITHUB_OUTPUT"
+
+      - name: Compare with stored versions
+        id: compare
+        run: |
+          STORED_DIGEST=$(jq -r '.openclaw.digest // ""' versions.json)
+          STORED_CLAUDE=$(jq -r '.claude_code.version // ""' versions.json)
+          NEW_DIGEST="${{ steps.fetch_openclaw.outputs.openclaw_digest }}"
+          NEW_CLAUDE="${{ steps.fetch_claude.outputs.claude_version }}"
+          FORCE="${{ github.event.inputs.force_build }}"
+
+          echo "Stored  OpenClaw digest : $STORED_DIGEST"
+          echo "Current OpenClaw digest : $NEW_DIGEST"
+          echo "Stored  claude-code ver : $STORED_CLAUDE"
+          echo "Current claude-code ver : $NEW_CLAUDE"
+
+          if [ "$STORED_DIGEST" != "$NEW_DIGEST" ] || \
+             [ "$STORED_CLAUDE" != "$NEW_CLAUDE" ] || \
+             [ "$FORCE" = "true" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Change detected — will trigger build."
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes detected — skipping build."
+          fi
+
+      - name: Update versions.json
+        if: steps.compare.outputs.changed == 'true'
+        run: |
+          NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          jq \
+            --arg digest "${{ steps.fetch_openclaw.outputs.openclaw_digest }}" \
+            --arg claude "${{ steps.fetch_claude.outputs.claude_version }}" \
+            --arg now "$NOW" \
+            '.openclaw.digest = $digest |
+             .openclaw.updated_at = $now |
+             .claude_code.version = $claude |
+             .claude_code.updated_at = $now' \
+            versions.json > versions.tmp.json
+          mv versions.tmp.json versions.json
+
+      - name: Commit updated versions.json
+        if: steps.compare.outputs.changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add versions.json
+          git commit -m "chore: update versions.json — openclaw/claude-code changed [skip ci]"
+          # Remove [skip ci] from message to actually trigger build workflow
+          git commit --amend -m "chore: update versions.json — openclaw/claude-code changed"
+          git push
+
+  build:
+    name: Trigger build
+    needs: check
+    if: needs.check.outputs.changed == 'true'
+    uses: ./.github/workflows/build.yml
+    with:
+      claude_version: ${{ needs.check.outputs.claude_version }}
+    secrets: inherit
