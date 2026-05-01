@@ -1,6 +1,9 @@
 # Environment variables (contains secrets)
 .env
 
+# User's local Compose file (copy of docker-compose.example.yml, may contain secrets)
+docker-compose.yml
+
 # Claude Code context file (contains local paths / sensitive info)
 CLAUDE.md
 

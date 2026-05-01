@@ -15,13 +15,18 @@ The image auto-rebuilds every 6 hours whenever a new OpenClaw release or Claude 
 
 ## Quick Start
 
-> **Want to see all options in one place?** See [`docker-compose.example.yml`](docker-compose.example.yml) — a fully annotated Compose file with every supported environment variable.
-
-### 1. Copy and configure the env file
+### 1. Copy the example files
 
 ```bash
+cp docker-compose.example.yml docker-compose.yml
 cp .env.example .env
 ```
+
+Both `docker-compose.yml` and `.env` are gitignored — customise them freely without worrying about accidentally committing secrets.
+
+[`docker-compose.example.yml`](docker-compose.example.yml) is a fully annotated Compose file with every supported environment variable included and commented.
+
+### 2. Set your gateway token
 
 Open `.env` and set at minimum:
 
@@ -39,13 +44,13 @@ Generate a strong token with:
 openssl rand -hex 32
 ```
 
-### 2. Start the container
+### 3. Start the container
 
 ```bash
 docker compose up -d
 ```
 
-### 3. Authenticate Claude (first time only)
+### 4. Authenticate Claude (first time only)
 
 ```bash
 docker exec -it openclaw-claude bash
@@ -55,7 +60,7 @@ exit
 
 This opens a browser OAuth flow. Your credentials are stored in the `claude-config` volume and persist across container restarts.
 
-### 4. Open the dashboard
+### 5. Open the dashboard
 
 OpenClaw will be available at **http://localhost:18789**
 
@@ -272,6 +277,11 @@ docker compose pull && docker compose up -d
 # Clone the repo
 git clone https://github.com/LeoRX/openclaw-claude.git
 cd openclaw-claude
+
+# Set up your local config files
+cp docker-compose.example.yml docker-compose.yml
+cp .env.example .env
+# Edit .env and set OPENCLAW_GATEWAY_TOKEN
 
 # Build for your local platform
 docker build -t openclaw-claude:local .
