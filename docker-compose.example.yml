@@ -1,0 +1,113 @@
+# docker-compose.example.yml
+#
+# Full example with all supported environment variables.
+# Copy to docker-compose.yml (or use alongside it) and uncomment what you need.
+#
+# Official OpenClaw Docker docs: https://docs.openclaw.ai/install/docker
+
+services:
+  openclaw-claude:
+    image: leorx/openclaw-claude:latest
+    container_name: openclaw-claude
+    restart: unless-stopped
+
+    ports:
+      - "18789:18789"   # OpenClaw gateway — web dashboard & API
+      - "18790:18790"   # OpenClaw bridge
+
+    volumes:
+      # OpenClaw config, state, workspace, and auth profiles
+      - openclaw-data:/home/node/.openclaw
+
+      # Plugin runtime dependencies (high-churn, kept separate)
+      - openclaw-plugins:/var/lib/openclaw/plugin-runtime-deps
+
+      # Claude CLI credentials — persist your `claude login` session
+      - claude-config:/home/node/.claude
+
+      # Optional: expose a host directory into the container
+      # Useful for giving agents access to local files/projects
+      # - /host/path/to/project:/home/node/project:rw
+
+      # Optional: expose the Docker socket so OpenClaw can manage containers
+      # Requires OPENCLAW_DOCKER_SOCKET to match if using rootless Docker
+      # - /var/run/docker.sock:/var/run/docker.sock
+
+    environment:
+
+      # ── Required ────────────────────────────────────────────────────────────
+
+      # Secret token to authenticate gateway API access.
+      # Generate with: openssl rand -hex 32
+      # Can also be set in .env file instead.
+      - OPENCLAW_GATEWAY_TOKEN=change-me-to-a-random-secret
+
+      # ── General ─────────────────────────────────────────────────────────────
+
+      - TZ=America/New_York
+
+      # ── Claude Authentication ────────────────────────────────────────────────
+      # Headless alternative to running `claude login` inside the container.
+      # Set ONE of these if you do not want to shell in and authenticate manually.
+      # - CLAUDE_AI_SESSION_KEY=your-claude-session-key
+      # - CLAUDE_WEB_SESSION_KEY=your-claude-web-session-key
+
+      # ── OpenClaw Networking ──────────────────────────────────────────────────
+
+      # Disable mDNS/Bonjour advertising on the local network
+      # - OPENCLAW_DISABLE_BONJOUR=true
+
+      # Enable agent sandbox mode (isolates agent execution)
+      # Values: 1 | true | yes | on
+      # - OPENCLAW_SANDBOX=true
+
+      # Skip the interactive onboarding wizard on first start
+      # - OPENCLAW_SKIP_ONBOARDING=true
+
+      # Override Docker socket path (for rootless Docker installs)
+      # - OPENCLAW_DOCKER_SOCKET=/run/user/1000/docker.sock
+
+      # Extra host bind mounts passed to agent containers (comma-separated)
+      # Format: /host/path:/container/path:mode,/host/path2:/container/path2
+      # - OPENCLAW_EXTRA_MOUNTS=/home/user/docs:/docs:ro
+
+      # Persist /home/node in a Docker named volume (named volume or path)
+      # - OPENCLAW_HOME_VOLUME=openclaw-home
+
+      # Container path for generated plugin dependencies
+      # - OPENCLAW_PLUGIN_STAGE_DIR=/var/lib/openclaw/plugin-runtime-deps
+
+      # Disable bundled plugin source bind-mount overlays
+      # - OPENCLAW_DISABLE_BUNDLED_SOURCE_OVERLAYS=true
+
+      # ── OpenTelemetry (optional) ─────────────────────────────────────────────
+
+      # OTLP/HTTP collector endpoint
+      # - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+
+      # Protocol — only http/protobuf is supported
+      # - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+
+      # Service name label shown in your telemetry backend
+      # - OTEL_SERVICE_NAME=openclaw-claude
+
+      # Opt into latest experimental GenAI semantic attributes
+      # - OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai
+
+      # Set to true if an OTel SDK is already loaded, to avoid a second instance
+      # - OPENCLAW_OTEL_PRELOADED=true
+
+    # Optional: health check so Docker knows when the gateway is ready
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18789/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  openclaw-data:
+  openclaw-plugins:
+  claude-config:
+  # Uncomment if using OPENCLAW_HOME_VOLUME=openclaw-home
+  # openclaw-home:

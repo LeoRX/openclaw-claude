@@ -15,6 +15,8 @@ The image auto-rebuilds every 6 hours whenever a new OpenClaw release or Claude 
 
 ## Quick Start
 
+> **Want to see all options in one place?** See [`docker-compose.example.yml`](docker-compose.example.yml) — a fully annotated Compose file with every supported environment variable.
+
 ### 1. Copy and configure the env file
 
 ```bash
