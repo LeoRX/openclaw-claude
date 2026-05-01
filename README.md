@@ -9,23 +9,59 @@ A ready-to-run Docker image combining **[OpenClaw](https://github.com/openclaw/o
 
 The image auto-rebuilds every 6 hours whenever a new OpenClaw release or Claude CLI version is detected.
 
+> **Official OpenClaw Docker docs:** https://docs.openclaw.ai/install/docker
+
 ---
 
 ## Quick Start
 
+### 1. Copy and configure the env file
+
 ```bash
-# 1. Copy the example env file
 cp .env.example .env
-
-# 2. Start the container
-docker compose up -d
-
-# 3. Authenticate Claude (first time only)
-docker exec -it openclaw-claude bash
-claude login
 ```
 
-OpenClaw will be available at `http://localhost:18789`.
+Open `.env` and set at minimum:
+
+```env
+# A strong random secret — protects your gateway API
+OPENCLAW_GATEWAY_TOKEN=change-me-to-a-random-secret
+
+# Your timezone
+TZ=America/New_York
+```
+
+Generate a strong token with:
+
+```bash
+openssl rand -hex 32
+```
+
+### 2. Start the container
+
+```bash
+docker compose up -d
+```
+
+### 3. Authenticate Claude (first time only)
+
+```bash
+docker exec -it openclaw-claude bash
+claude login
+exit
+```
+
+This opens a browser OAuth flow. Your credentials are stored in the `claude-config` volume and persist across container restarts.
+
+### 4. Open the dashboard
+
+OpenClaw will be available at **http://localhost:18789**
+
+Retrieve the exact dashboard URL at any time:
+
+```bash
+docker compose exec openclaw-claude node openclaw.mjs dashboard --no-open
+```
 
 ---
 
@@ -65,17 +101,44 @@ docker pull leorx/openclaw-claude:2026.04.30
 
 ## Environment Variables
 
-Configure OpenClaw via a `.env` file (see [`.env.example`](.env.example)):
+Configure via a `.env` file (see [`.env.example`](.env.example)). All variables are passed directly to the OpenClaw process.
+
+### Core
 
 | Variable | Description |
 |----------|-------------|
 | `TZ` | Timezone (e.g. `America/New_York`) |
-| `OPENCLAW_GATEWAY_TOKEN` | Secret token to secure the gateway |
-| `OPENCLAW_DISABLE_BONJOUR` | Set `true` to disable mDNS discovery |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry collector endpoint |
-| `OTEL_SERVICE_NAME` | Service name for telemetry |
-| `CLAUDE_AI_SESSION_KEY` | Claude session key (alternative to `claude login`) |
-| `CLAUDE_WEB_SESSION_KEY` | Claude web session key (alternative to `claude login`) |
+| `OPENCLAW_GATEWAY_TOKEN` | **Required.** Secret token to authenticate gateway API access. Generate with `openssl rand -hex 32`. |
+
+### Claude Authentication (alternative to `claude login`)
+
+| Variable | Description |
+|----------|-------------|
+| `CLAUDE_AI_SESSION_KEY` | Claude session key (headless alternative to running `claude login`) |
+| `CLAUDE_WEB_SESSION_KEY` | Claude web session key |
+
+### OpenClaw Networking
+
+| Variable | Description |
+|----------|-------------|
+| `OPENCLAW_DISABLE_BONJOUR` | Set to `true` to disable mDNS/Bonjour advertising on the local network |
+| `OPENCLAW_SANDBOX` | Enable sandbox mode for agent execution. Set to `1`, `true`, `yes`, or `on` |
+| `OPENCLAW_DOCKER_SOCKET` | Override Docker socket path (useful for rootless Docker setups) |
+| `OPENCLAW_EXTRA_MOUNTS` | Comma-separated extra host bind mounts to expose inside the container |
+| `OPENCLAW_HOME_VOLUME` | Persist `/home/node` in a Docker named volume |
+| `OPENCLAW_PLUGIN_STAGE_DIR` | Container path for generated plugin dependencies |
+| `OPENCLAW_SKIP_ONBOARDING` | Set to `true` to skip the interactive onboarding step on first start |
+| `OPENCLAW_DISABLE_BUNDLED_SOURCE_OVERLAYS` | Disable bundled plugin source bind-mount overlays |
+
+### OpenTelemetry (optional)
+
+| Variable | Description |
+|----------|-------------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP/HTTP collector endpoint (e.g. `http://otel-collector:4318`) |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | OTLP protocol — only `http/protobuf` is supported |
+| `OTEL_SERVICE_NAME` | Service name label for telemetry data |
+| `OTEL_SEMCONV_STABILITY_OPT_IN` | Opt into latest experimental GenAI semantic attributes |
+| `OPENCLAW_OTEL_PRELOADED` | Set to `true` to skip starting a second OpenTelemetry SDK |
 
 ---
 
@@ -83,9 +146,22 @@ Configure OpenClaw via a `.env` file (see [`.env.example`](.env.example)):
 
 | Volume | Container Path | Purpose |
 |--------|---------------|---------|
-| `openclaw-data` | `/home/node/.openclaw` | OpenClaw config, state, and plugins |
-| `openclaw-plugins` | `/var/lib/openclaw/plugin-runtime-deps` | Plugin runtime dependencies |
+| `openclaw-data` | `/home/node/.openclaw` | OpenClaw config, state, workspace, and auth profiles |
+| `openclaw-plugins` | `/var/lib/openclaw/plugin-runtime-deps` | Plugin runtime dependencies (high-churn) |
 | `claude-config` | `/home/node/.claude` | Claude CLI credentials and config |
+
+### What lives in `openclaw-data` (`/home/node/.openclaw`)
+
+```
+/home/node/.openclaw/
+├── openclaw.json          # Main behavior configuration
+├── .env                   # Runtime secrets (OPENCLAW_GATEWAY_TOKEN, etc.)
+├── workspace/             # Agent workspaces
+└── agents/
+    └── <agentId>/
+        └── agent/
+            └── auth-profiles.json   # OAuth tokens & API keys per agent
+```
 
 ---
 
@@ -93,8 +169,81 @@ Configure OpenClaw via a `.env` file (see [`.env.example`](.env.example)):
 
 | Port | Description |
 |------|-------------|
-| `18789` | OpenClaw gateway (main UI/API) |
+| `18789` | OpenClaw gateway — web dashboard and API |
 | `18790` | OpenClaw bridge |
+
+### Health checks
+
+```bash
+# Liveness probe
+curl -fsS http://127.0.0.1:18789/healthz
+
+# Readiness probe
+curl -fsS http://127.0.0.1:18789/readyz
+
+# Deep health snapshot (requires gateway token)
+docker compose exec openclaw-claude node openclaw.mjs health --token "$OPENCLAW_GATEWAY_TOKEN"
+```
+
+### Prometheus metrics
+
+Metrics are exposed (authenticated) at:
+
+```
+http://127.0.0.1:18789/api/diagnostics/prometheus
+```
+
+---
+
+## Connecting to Local AI Models
+
+To reach services running on your **host machine** (e.g. LM Studio, Ollama) from inside the container, use the special Docker hostname:
+
+```
+host.docker.internal
+```
+
+Example endpoints:
+
+| Service | URL |
+|---------|-----|
+| LM Studio | `http://host.docker.internal:1234` |
+| Ollama | `http://host.docker.internal:11434` |
+
+> **Note:** The local service must listen on `0.0.0.0` (not `127.0.0.1`) to be reachable from Docker.
+
+---
+
+## Messaging Channels
+
+OpenClaw supports connecting messaging platforms to your AI agents. Shell into the container to configure:
+
+```bash
+docker exec -it openclaw-claude bash
+
+# WhatsApp
+node openclaw.mjs channels login
+
+# Telegram
+node openclaw.mjs channels add --channel telegram --token "<your-telegram-bot-token>"
+
+# Discord
+node openclaw.mjs channels add --channel discord --token "<your-discord-bot-token>"
+```
+
+---
+
+## Device Management
+
+Approve connected devices (e.g. mobile apps) from the CLI:
+
+```bash
+# List pending device requests
+docker compose exec openclaw-claude node openclaw.mjs devices list
+
+# Approve a device
+docker compose exec openclaw-claude node openclaw.mjs devices approve <requestId>
+```
 
 ---
 
@@ -108,6 +257,7 @@ This image is rebuilt automatically every 6 hours by a GitHub Actions workflow t
 4. If either changed → commits updated `versions.json` → triggers a new multi-arch build → pushes to Docker Hub
 
 To pull the latest image:
+
 ```bash
 docker compose pull && docker compose up -d
 ```
@@ -145,6 +295,15 @@ To publish images from your own fork, add these secrets to your GitHub repositor
 | `DOCKERHUB_TOKEN` | Docker Hub access token (not your password) |
 
 Generate a Docker Hub access token at: **Docker Hub → Account Settings → Personal Access Tokens**
+
+---
+
+## Further Reading
+
+- [OpenClaw Docker install guide](https://docs.openclaw.ai/install/docker)
+- [OpenClaw gateway security hardening](https://docs.openclaw.ai/gateway/security)
+- [Claude CLI documentation](https://docs.anthropic.com/en/docs/claude-code)
+- [Docker Hub — leorx/openclaw-claude](https://hub.docker.com/r/leorx/openclaw-claude)
 
 ---
 
