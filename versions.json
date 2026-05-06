@@ -1,11 +1,11 @@
 {
   "openclaw": {
     "digest": "sha256:69895e31e3c36030b465b364365e9a22160737b000a0712082c7278e18f80e56",
-    "updated_at": "2026-05-05T08:12:57Z"
+    "updated_at": "2026-05-06T03:22:11Z"
   },
   "claude_code": {
-    "version": "2.1.128",
-    "updated_at": "2026-05-05T08:12:57Z"
+    "version": "2.1.129",
+    "updated_at": "2026-05-06T03:22:11Z"
   },
   "last_build": ""
 }
