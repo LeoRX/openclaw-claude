@@ -15,6 +15,12 @@ ARG CLAUDE_VERSION
 
 USER root
 
+# Install utilities
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nano \
+    openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Claude CLI globally (pinned version when provided)
 RUN npm install -g @anthropic-ai/claude-code${CLAUDE_VERSION:+@${CLAUDE_VERSION}}
 
